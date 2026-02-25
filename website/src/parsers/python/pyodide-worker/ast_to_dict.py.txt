@@ -1,0 +1,65 @@
+"""
+Convert Python AST to dictionary format matching ast2json library.
+
+This module is used both:
+1. In the browser via Pyodide (imported as raw text)
+2. In tests (imported as a Python module)
+"""
+
+import ast
+
+
+def ast_to_dict(node):
+    """Convert AST node to dictionary matching ast2json format.
+
+    Includes location information (lineno, col_offset, etc.) but omits
+    deprecated fields (n, s) that will be removed in Python 3.14.
+    """
+    if isinstance(node, ast.AST):
+        result = {"_type": node.__class__.__name__}
+        for field, value in ast.iter_fields(node):
+            result[field] = ast_to_dict(value)
+        for attr in ("lineno", "col_offset", "end_lineno", "end_col_offset"):
+            if hasattr(node, attr):
+                result[attr] = getattr(node, attr)
+        return result
+    if isinstance(node, list):
+        return [ast_to_dict(item) for item in node]
+    return node
+
+
+def _format_syntax_error(exc):
+    location = []
+    if getattr(exc, "lineno", None) is not None:
+        location.append(f"line {exc.lineno}")
+    if getattr(exc, "offset", None) is not None:
+        location.append(f"column {exc.offset}")
+    location_suffix = f" ({', '.join(location)})" if location else ""
+
+    return {
+        "type": exc.__class__.__name__,
+        "message": str(exc),
+        "lineno": getattr(exc, "lineno", None),
+        "offset": getattr(exc, "offset", None),
+        "end_lineno": getattr(exc, "end_lineno", None),
+        "end_offset": getattr(exc, "end_offset", None),
+        "text": getattr(exc, "text", None),
+        "display": f"{exc.__class__.__name__}: {exc}{location_suffix}",
+    }
+
+
+def parse_to_dict(code):
+    """Parse Python code and return AST as dictionary result object."""
+    try:
+        tree = ast.parse(code)
+        return {
+            "success": True,
+            "ast": ast_to_dict(tree),
+            "error": None,
+        }
+    except SyntaxError as exc:
+        return {
+            "success": False,
+            "ast": None,
+            "error": _format_syntax_error(exc),
+        }
